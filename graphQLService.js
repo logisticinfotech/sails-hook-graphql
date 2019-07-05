@@ -88,6 +88,7 @@ module.exports = graphQLService = {
     GraphQLSchemaManager
   ) {
     var attributes = model.attributes;
+
     return new GraphQLObjectType({
       name: modelID,
       description: model.description,
@@ -124,9 +125,14 @@ module.exports = graphQLService = {
 
         var associations = model.associations;
         associations.forEach(association => {
+
           if (association.model) {
+            var modelType = GraphQLSchemaManager.types[association.model];
+            if(!modelType){
+              modelType = graphQLService.CustomJson;
+            }
             convertedFields[association.alias] = {
-              type: GraphQLSchemaManager.types[association.model],
+              type: modelType,
               description: association.description,
               resolve: (obj /*, args */) => {
                 return GraphQLSchemaManager.queries[association.model][
@@ -308,17 +314,19 @@ module.exports = graphQLService = {
             });
           } else if (aggregate[0] === 'sum') {
             return waterlineModel
-              .find(whereClause)
               .sum(aggregate[1])
+              .where(whereClause['where'])
               .then((results) => {
-                return results;
+                var res = [{ count: results }];
+                return res;
+                // return results;
               });
           } else if (aggregate[0] === 'average') {
             return waterlineModel
-              .findOne(whereClause)
-              .average(aggregate[1])
+              .avg(aggregate[1])
+              .where(whereClause['where'])
               .then((results) => {
-                var res = [{ average: results[aggregate[1]] }];
+                var res = [{ count: results}];
                 return res;
               });
           }
