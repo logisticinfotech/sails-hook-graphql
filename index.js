@@ -29,12 +29,14 @@ module.exports = function defineGraphqlHook(sails) {
 
       sails.after(eventsToWaitFor, () => {
 
-        this.registerActions();
         // ----- Write To Schema File ------
         var schema = graphQLService.getGraphQLSchemaFrom(sails.models);
         // console.log(printSchema(schema));
         try{
-          fs.writeFileSync('schema.graphql', printSchema(schema));
+          if(schema){
+            fs.writeFileSync('schema.graphql', printSchema(schema));
+            this.registerActions();
+          }
         } catch (e){
             console.log("Cannot write file ", e);
         }
@@ -45,7 +47,7 @@ module.exports = function defineGraphqlHook(sails) {
         // console.log(schema);
 
         sails.config.graphqlschema = schema;
-        sails.config.graphql = require('express-graphql')({
+        sails.config.graphql.expressGraphql = require('express-graphql')({
           schema: schema,
           // directives: [GraphQLDateDirective],
           pretty: true,

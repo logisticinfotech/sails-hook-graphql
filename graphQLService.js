@@ -12,7 +12,8 @@ const {
   GraphQLScalarType
 } = require('graphql');
 
-const skipFields = ['createdAt', 'updatedAt'];
+let skipFieldsQuery = [];
+let skipFieldsMutation = [];
 var gqlSchemaManager = {
   types: {},
   findArgsTypes: {},
@@ -29,8 +30,28 @@ module.exports = graphQLService = {
     serialize(value) {
       return value; // value sent to the client
     }
+    // parseValue(value) {
+    //   console.log('CustomJson parseValue: ', value, typeof value);
+    //   if(typeof value == "string") {
+    //     console.log('CustomJson parseValue stringParse: ', JSON.parse(value));
+    //     return JSON.parse(value);
+    //   }
+    //   return value; // value sent to the client
+    // }
+    // parseLiteral(ast, a, b) {
+    //   console.log("CustomJson parseLiteral: ", ast);
+    //   console.log("a, b", a, b);
+    //   // console.log("CustomJson parseLiteral ast.name: ", ast.fields[0].name);
+    //   // console.log("CustomJson parseLiteral ast.value: ", ast.fields[0].value);
+    //   if (ast.kind === 'StringValue') {
+    //     var jsonObj = JSON.parse(ast.value);
+    //     console.log('CustomJson parseLiteral jsonObj: ', jsonObj);
+    //     return jsonObj;
+    //   }
+    //   return ast.fields;
+    // }
   }),
-  waterlineTypesToGraphQLType: function(attribute) {
+  waterlineTypesToGraphQLType: function (attribute) {
     var graphqlType;
     switch (attribute.type) {
       case 'string':
@@ -52,7 +73,7 @@ module.exports = graphQLService = {
     return graphqlType;
   },
 
-  getFindArgsForWaterlineModel: function(modelID) {
+  getFindArgsForWaterlineModel: function (modelID) {
     return {
       where: {
         name: 'criteria',
@@ -81,7 +102,7 @@ module.exports = graphQLService = {
     };
   },
 
-  createGraphQLTypeForWaterlineModel: function(model, modelID) {
+  createGraphQLTypeForWaterlineModel: function (model, modelID) {
     var attributes = model.attributes;
     return new GraphQLObjectType({
       name: modelID,
@@ -90,7 +111,7 @@ module.exports = graphQLService = {
         var convertedFields = {};
         // console.log("graphQLServices createGraphQLTypeForWaterlineModel attributes ", attributes)
         _.mapKeys(attributes, (attribute, key) => {
-          if (attribute.type && !skipFields.includes(key)) {
+          if (attribute.type && !skipFieldsQuery.includes(key)) {
             var field = {
               type: graphQLService.waterlineTypesToGraphQLType(attribute),
               description: attribute.description
@@ -100,19 +121,21 @@ module.exports = graphQLService = {
           }
         });
 
-        var countField = {
-          type: new GraphQLNonNull(GraphQLString)
-        };
-        var averageField = {
-          type: new GraphQLNonNull(GraphQLFloat)
-        };
-
-        convertedFields.count = countField;
-        convertedFields.average = averageField;
+        console.log("addInQuery ", );
+        if(model.graphql.addInQuery) {
+          for (let aiq = 0; aiq < model.graphql.addInQuery.length; aiq++) {
+            const fieldAdd = model.graphql.addInQuery[aiq];
+            var field = {
+              type: graphQLService.waterlineTypesToGraphQLType({type: 'string'}),
+              description: "Extra Field"
+            };
+            convertedFields[fieldAdd] = field;
+          }
+        }
 
         var associations = model.associations;
         associations.forEach(association => {
-          if (association.model) {
+          if (association.model && gqlSchemaManager.types[association.model]) {
             convertedFields[association.alias] = {
               type: gqlSchemaManager.types[association.model],
               description: association.description,
@@ -126,6 +149,13 @@ module.exports = graphQLService = {
                 });
               }
             };
+          } else if (association.model && !gqlSchemaManager.types[association.model]) {
+            // This is return value of fields if association model is not generated graphql query
+            var field = {
+              type: GraphQLInt,
+              description: ""
+            };
+            convertedFields[association.alias] = field;
           }
           /*else if (association.collection) {
                                            console.log("graphQLServices createGraphQLTypeForWaterlineModel association ", association);
@@ -150,7 +180,7 @@ module.exports = graphQLService = {
     });
   },
 
-  createFindArgsTypeForWaterlineModel: function(model, modelID) {
+  createFindArgsTypeForWaterlineModel: function (model, modelID) {
     var attributes = model.attributes;
     return new GraphQLInputObjectType({
       name: `${modelID}Args`,
@@ -158,7 +188,7 @@ module.exports = graphQLService = {
       fields: () => {
         var convertedFields = {};
         _.mapKeys(attributes, (attribute, key) => {
-          if (attribute.type && !skipFields.includes(key)) {
+          if (attribute.type && !skipFieldsQuery.includes(key)) {
             // if (attribute.type) {
             var field = {
               type: graphQLService.waterlineTypesToGraphQLType(attribute),
@@ -212,7 +242,7 @@ module.exports = graphQLService = {
     });
   },
 
-  createGraphQLQueries: function(waterlineModel, graphqlType, modelID) {
+  createGraphQLQueries: function (waterlineModel, graphqlType, modelID) {
     var queries = {};
     // query to get by id
     queries[modelID] = {
@@ -221,17 +251,32 @@ module.exports = graphQLService = {
         id: {
           name: 'id',
           type: new GraphQLNonNull(GraphQLInt)
-        }
+        },
+        populate: {
+          name: 'populate',
+          type: graphQLService.CustomJson
+        },
       },
-      resolve: (obj, { where, id }) => {
-        return waterlineModel
-          .find({
-            id: id || (where && where.id)
-          })
-          .limit(1)
-          .then(result => {
-            return result[0];
-          });
+      resolve: (obj, criteria) => {
+        var { where, id } = criteria;
+
+        var populate = criteria.populate;
+        delete criteria.populate;
+
+        var wlm = waterlineModel.find({
+          id: id || (where && where.id)
+        }).limit(1);
+        if (populate) {
+          if (populate[0].criteria) {
+            wlm.populate(populate[0].type, populate[0].criteria);
+          } else {
+            wlm.populate(populate[0].type);
+          }
+        }
+
+        return wlm.then(result => {
+          return JSON.parse(JSON.stringify(result[0]));
+        });
       }
     };
     // query to find based on search criteria
@@ -239,7 +284,6 @@ module.exports = graphQLService = {
       type: new GraphQLList(graphqlType),
       args: graphQLService.getFindArgsForWaterlineModel(modelID),
       resolve: (obj, criteria) => {
-        // console.log("graphQLServices createGraphQLQueries criteria : ", criteria);
         var populate = criteria.populate;
         delete criteria.populate;
         var aggregate = criteria.aggregate;
@@ -264,54 +308,182 @@ module.exports = graphQLService = {
           } else {
             wlm.populate(populate[0].type);
           }
-          return wlm.then(results => {
-            return results;
-          });
-        } else if (aggregate) {
-          if (aggregate[0] === 'count') {
-            wlm = waterlineModel.count(whereClause);
-            return wlm.then(results => {
-              var res = [{ count: results }];
-              return res;
-            });
-          } else if (aggregate[0] === 'sum') {
-            return waterlineModel
-              .sum(aggregate[1])
-              .where(whereClause['where'])
-              .then(results => {
-                var res = [{ count: results }];
-                return res;
-                // return results;
-              });
-          } else if (aggregate[0] === 'average') {
-            return waterlineModel
-              .avg(aggregate[1])
-              .where(whereClause['where'])
-              .then(results => {
-                var res = [{ count: results }];
-                return res;
-              });
-          }
-        } else {
-          return wlm.then(results => {
-            return results;
-          });
         }
+
+        return wlm.then(results => {
+          return JSON.parse(JSON.stringify(results));
+        });
       }
     };
     return queries;
   },
 
-  capitalizeFirstLetter: function(string) {
+  createCountQueries: function (modelID) {
+
+    const countType = new GraphQLObjectType({
+      name: 'count',
+      fields: {
+        count: {
+          type: GraphQLInt,
+          description: "return count of specific fields"
+        }
+      },
+    });
+    var queries = {};
+    queries[modelID] = {
+      type: countType,
+      args: {
+        modelName: {
+          name: 'modelName',
+          type: new GraphQLNonNull(GraphQLString)
+        },
+        where: {
+          name: 'where',
+          type: graphQLService.CustomJson
+        },
+      },
+      resolve: (obj, criteria) => {
+        var newCriteria;
+        if (criteria.where) {
+          newCriteria = JSON.stringify(criteria.where)
+            .replace(/gte/g, '>=')
+            .replace(/gt/g, '>')
+            .replace(/lte/g, '<=')
+            .replace(/lt/g, '<')
+            .replace(/neq/g, '!=');
+          newCriteria = JSON.parse(newCriteria);
+        }
+        var whereClause = newCriteria ? newCriteria : {};
+        var model = sails.models[criteria.modelName];
+        var wlm = model.find(whereClause);
+        wlm = model.count(whereClause);
+        return wlm.then(results => {
+          var res = { count: results };
+          return res;
+        });
+      }
+    };
+    return queries;
+  },
+  createSumQueries: function (modelID) {
+
+    const sumType = new GraphQLObjectType({
+      name: 'sum',
+      fields: {
+        sum: {
+          type: GraphQLInt,
+          description: "return sum of specific fields"
+        }
+      },
+    });
+    var queries = {};
+    queries[modelID] = {
+      type: sumType,
+      args: {
+        modelName: {
+          name: 'modelName',
+          type: new GraphQLNonNull(GraphQLString)
+        },
+        where: {
+          name: 'where',
+          type: graphQLService.CustomJson
+        },
+        field: {
+          name: 'field',
+          type: new GraphQLNonNull(GraphQLString)
+        },
+      },
+      resolve: (obj, criteria) => {
+        var newCriteria;
+        if (criteria.where) {
+          newCriteria = JSON.stringify(criteria.where)
+            .replace(/gte/g, '>=')
+            .replace(/gt/g, '>')
+            .replace(/lte/g, '<=')
+            .replace(/lt/g, '<')
+            .replace(/neq/g, '!=');
+          newCriteria = JSON.parse(newCriteria);
+        }
+        var whereClause = newCriteria ? newCriteria : {};
+        var model = sails.models[criteria.modelName];
+        var field = criteria.field;
+
+        return model
+              .sum(field)
+              .where(whereClause)
+              .then(results => {
+                var res = { sum: results };
+                return res;
+              });
+      }
+    };
+    return queries;
+  },
+  createAvgQueries: function (modelID) {
+
+    const avgType = new GraphQLObjectType({
+      name: 'avg',
+      fields: {
+        avg: {
+          type: GraphQLInt,
+          description: "return avg of specific fields"
+        }
+      },
+    });
+    var queries = {};
+    queries[modelID] = {
+      type: avgType,
+      args: {
+        modelName: {
+          name: 'modelName',
+          type: new GraphQLNonNull(GraphQLString)
+        },
+        where: {
+          name: 'where',
+          type: graphQLService.CustomJson
+        },
+        field: {
+          name: 'field',
+          type: new GraphQLNonNull(GraphQLString)
+        },
+      },
+      resolve: (obj, criteria) => {
+        var newCriteria;
+        if (criteria.where) {
+          newCriteria = JSON.stringify(criteria.where)
+            .replace(/gte/g, '>=')
+            .replace(/gt/g, '>')
+            .replace(/lte/g, '<=')
+            .replace(/lt/g, '<')
+            .replace(/neq/g, '!=');
+          newCriteria = JSON.parse(newCriteria);
+        }
+        var whereClause = newCriteria ? newCriteria : {};
+        var model = sails.models[criteria.modelName];
+        var field = criteria.field;
+
+        return model
+              .avg(field)
+              .where(whereClause)
+              .then(results => {
+                var res = { avg: results };
+                return res;
+              });
+      }
+    };
+    return queries;
+  },
+
+  capitalizeFirstLetter: function (string) {
     return string.charAt(0).toUpperCase() + string.slice(1);
   },
 
-  createGraphQLMutations: function(waterlineModel, graphqlType, modelID) {
+  createGraphQLMutations: function (waterlineModel, graphqlType, modelID) {
     var mutations = {};
     var attributes = waterlineModel.attributes;
     var convertedFields = {};
     _.mapKeys(attributes, (attribute, key) => {
-      if (attribute.type && !skipFields.includes(key)) {
+      if (attribute.type && !skipFieldsMutation.includes(key)) {
         var field = {
           type: graphQLService.waterlineTypesToGraphQLType(attribute),
           description: attribute.description
@@ -328,7 +500,7 @@ module.exports = graphQLService = {
       type: graphqlType,
       args: fieldsForCreate,
       // resolve: wrapResolve(waterlineModel.create),
-      resolve: async function(root, args, context, info) {
+      resolve: async function (root, args, context, info) {
         // check context also before populating
         try {
           let query = await waterlineModel.create(args).fetch();
@@ -348,7 +520,7 @@ module.exports = graphQLService = {
       type: graphqlType,
       args: convertedFields,
       // resolve: wrapResolve(waterlineModel.update),
-      resolve: async function(root, args, context, info) {
+      resolve: async function (root, args, context, info) {
         // // next ligne is false
         // if (!Object.keys(args).length) {
         //   return new Error(`must provide at least one parameter in `)
@@ -371,7 +543,7 @@ module.exports = graphQLService = {
       type: graphqlType,
       args: { id: modelIDField },
       // resolve: wrapResolve(waterlineModel.delete),
-      resolve: async function(root, args, context, info) {
+      resolve: async function (root, args, context, info) {
         if (!Object.keys(args).length) {
           return new Error(`must provide at least one parameter`);
         }
@@ -392,7 +564,11 @@ module.exports = graphQLService = {
     return mutations;
   },
 
-  getGraphQLSchemaFrom: function(models) {
+  getGraphQLSchemaFrom: function (models) {
+    // if grahql disable in config/graphql.js files than we return blank from here
+    if (sails.config.graphql && sails.config.graphql.disable) {
+      return "";
+    }
     if (!models) {
       throw new Error('Invalid input args models is' + models);
     }
@@ -421,9 +597,30 @@ module.exports = graphQLService = {
         );
       }
     });
+    // Create query for get global count
+    gqlSchemaManager.queries["count"] = graphQLService.createCountQueries("count");
+    gqlSchemaManager.queries["sum"] = graphQLService.createSumQueries("sum");
+    gqlSchemaManager.queries["avg"] = graphQLService.createAvgQueries("avg");
 
     // this is for create mutation of models
     _.each(models, function eachInstantiatedModel(thisModel, modelID) {
+      // if (thisModel.graphql && thisModel.graphql.hiddenInMutation) {
+      //   skipFieldsMutation = thisModel.graphql.hiddenInMutation;
+      // }
+      // check if global setting available for hidden any fields for mutations
+      if (thisModel.graphql && (thisModel.graphql.hiddenInMutation || (sails.config.graphql && sails.config.graphql.hiddenInMutation))) {
+        skipFieldsMutation = _.concat(thisModel.graphql.hiddenInMutation, sails.config.graphql.hiddenInMutation);
+        skipFieldsMutation = _.compact(skipFieldsMutation);
+      }
+      // if (thisModel.graphql && thisModel.graphql.hiddenInQuery) {
+      //   skipFieldsQuery = thisModel.graphql.hiddenInQuery;
+      // }
+
+      // check if global setting available for hidden any fields for query
+      if (thisModel.graphql && (thisModel.graphql.hiddenInQuery || (sails.config.graphql && sails.config.graphql.hiddenInQuery))) {
+        skipFieldsQuery = _.concat(thisModel.graphql.hiddenInQuery, sails.config.graphql.hiddenInQuery);
+        skipFieldsQuery = _.compact(skipFieldsQuery);
+      }
       if (thisModel.graphql && thisModel.graphql.mutation) {
         gqlSchemaManager.mutations[
           modelID
@@ -443,7 +640,6 @@ module.exports = graphQLService = {
         });
       }
     });
-
     var mutationFields = _.reduce(
       gqlSchemaManager.mutations,
       (total, obj, key) => {
@@ -451,15 +647,21 @@ module.exports = graphQLService = {
       }
     );
 
-    var mutationType = new GraphQLObjectType({
-      name: 'Mutation',
-      fields: mutationFields
-    });
-
-    var schema = new GraphQLSchema({
-      query: queryType,
-      mutation: mutationType
-    });
+    var schema;
+    if (mutationFields) {
+      var mutationType = new GraphQLObjectType({
+        name: 'Mutation',
+        fields: mutationFields
+      });
+      schema = new GraphQLSchema({
+        query: queryType,
+        mutation: mutationType
+      });
+    } else {
+      schema = new GraphQLSchema({
+        query: queryType
+      });
+    }
 
     return schema;
   }
