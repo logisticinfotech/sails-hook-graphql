@@ -1,6 +1,6 @@
 {
     "name": "@logisticinfotech/sails-hook-graphql",
-    "version": "0.0.6",
+    "version": "0.0.7",
     "description": "sails hook for generating graphql from existing models, it also provides graphql playground on the fly.",
     "main": "index.js",
     "scripts": {

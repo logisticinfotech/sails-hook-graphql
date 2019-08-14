@@ -58,7 +58,7 @@ module.exports = graphQLService = {
         graphqlType = GraphQLString;
         break;
       case 'number':
-        graphqlType = GraphQLInt;
+        graphqlType = GraphQLFloat;
         break;
       case 'boolean':
         graphqlType = GraphQLBoolean;
@@ -120,8 +120,6 @@ module.exports = graphQLService = {
             convertedFields[key] = field;
           }
         });
-
-        console.log("addInQuery ", );
         if(model.graphql.addInQuery) {
           for (let aiq = 0; aiq < model.graphql.addInQuery.length; aiq++) {
             const fieldAdd = model.graphql.addInQuery[aiq];
