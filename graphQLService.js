@@ -51,7 +51,7 @@ module.exports = graphQLService = {
     //   return ast.fields;
     // }
   }),
-  waterlineTypesToGraphQLType: function (attribute) {
+  waterlineTypesToGraphQLType: function (attribute, required = true) {
     var graphqlType;
     switch (attribute.type) {
       case 'string':
@@ -67,7 +67,7 @@ module.exports = graphQLService = {
         graphqlType = graphQLService.CustomJson;
     }
 
-    if (attribute.required) {
+    if (attribute.required && required) {
       graphqlType = new GraphQLNonNull(graphqlType);
     }
     return graphqlType;
@@ -483,7 +483,7 @@ module.exports = graphQLService = {
     _.mapKeys(attributes, (attribute, key) => {
       if (attribute.type && !skipFieldsMutation.includes(key)) {
         var field = {
-          type: graphQLService.waterlineTypesToGraphQLType(attribute),
+          type: graphQLService.waterlineTypesToGraphQLType(attribute, true),
           description: attribute.description
         };
         convertedFields[key] = field;
@@ -514,6 +514,16 @@ module.exports = graphQLService = {
       name: 'create' + modelID
     };
 
+    convertedFields = {};
+    _.mapKeys(attributes, (attribute, key) => {
+      if (attribute.type && !skipFieldsMutation.includes(key)) {
+        var field = {
+          type: graphQLService.waterlineTypesToGraphQLType(attribute, false),
+          description: attribute.description
+        };
+        convertedFields[key] = field;
+      }
+    });
     mutations['update' + graphQLService.capitalizeFirstLetter(modelID)] = {
       type: graphqlType,
       args: convertedFields,
