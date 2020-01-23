@@ -47,7 +47,7 @@ module.exports = function defineGraphqlHook(sails) {
         // console.log(schema);
 
         sails.config.graphqlschema = schema;
-        sails.config.graphql.expressGraphql = require('express-graphql')({
+        sails.config.graphql = require('express-graphql')({
           schema: schema,
           // directives: [GraphQLDateDirective],
           pretty: true,
